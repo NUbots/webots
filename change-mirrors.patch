@@ -1,0 +1,49 @@
+diff --git a/dependencies/Makefile.linux b/dependencies/Makefile.linux
+index d63ee5946..49f6ba9f9 100644
+--- a/dependencies/Makefile.linux
++++ b/dependencies/Makefile.linux
+@@ -4,7 +4,9 @@ WEBOTS_HOME_LIB = $(WEBOTS_HOME)/lib/webots
+ 
+ include $(WEBOTS_HOME)/resources/Makefile.os.include
+ 
+-DEPENDENCIES_URL = https://cyberbotics.com/files/repository/dependencies/linux64/release
++# Replace Cyberbotics' mirror with the one we have on GitHub for faster downloads
++# DEPENDENCIES_URL = https://cyberbotics.com/files/repository/dependencies/linux64/release
++DEPENDENCIES_URL = https://github.com/NUbots/WebotsDependenciesMirror/releases/download/v2021.05.28-a
+ 
+ QT_VERSION = 5.15.0
+ QT_PACKAGE = webots-qt-$(QT_VERSION)-linux64-release.tar.bz2
+diff --git a/projects/default/resources/Makefile b/projects/default/resources/Makefile
+index 0512aea30..d67edb0eb 100644
+--- a/projects/default/resources/Makefile
++++ b/projects/default/resources/Makefile
+@@ -56,7 +56,11 @@ release debug profile: $(SUMO_TARGET)
+ $(SUMO_TARGET):
+ 	@if ! $(WGET) -h > /dev/null ; then echo "You need to download the" $(SUMO_PACKAGE) "package and copy it in this directory"; fi
+ 	@echo "#" downloading $(SUMO_PACKAGE)
+-	@$(WGET) https://www.cyberbotics.com/files/repository/dependencies/$(OS_TAG)/release/$(SUMO_PACKAGE)
++
++	# Replace Cyberbotics' mirror with the one we have on GitHub for faster downloads
++	# @$(WGET) https://www.cyberbotics.com/files/repository/dependencies/$(OS_TAG)/release/$(SUMO_PACKAGE)
++	@$(WGET) https://github.com/NUbots/WebotsDependenciesMirror/releases/download/v2021.05.28-a/sumo-0.30-linux64.tar.gz
++
+ 	@echo "#" extracting $(SUMO_PACKAGE)
+ 	@$(EXTRACT) $(SUMO_PACKAGE)
+ 	@echo "#" removing old $(SUMO_TARGET)
+diff --git a/projects/robots/gctronic/e-puck/transfer/Makefile b/projects/robots/gctronic/e-puck/transfer/Makefile
+index 973e4c437..8a65374b8 100644
+--- a/projects/robots/gctronic/e-puck/transfer/Makefile
++++ b/projects/robots/gctronic/e-puck/transfer/Makefile
+@@ -43,7 +43,11 @@ release debug profile: $(XC16_TARGET)
+ $(XC16_TARGET):
+ 	@if ! $(WGET) -h > /dev/null ; then echo "You need to download the" $(XC16_PACKAGE) "package and copy it in this directory"; fi
+ 	@echo "#" downloading $(XC16_PACKAGE)
+-	@$(WGET) https://www.cyberbotics.com/files/repository/dependencies/$(OS_TAG)/release/$(XC16_PACKAGE)
++
++	# Replace Cyberbotics' mirror with the one we have on GitHub for faster downloads
++	# @$(WGET) https://www.cyberbotics.com/files/repository/dependencies/$(OS_TAG)/release/$(XC16_PACKAGE)
++	@$(WGET) https://github.com/NUbots/WebotsDependenciesMirror/releases/download/v2021.05.28-a/xc16-1.24.zip
++
+ 	@echo "#" removing old $(XC16_TARGET)
+ 	@rm -rf $(XC16_TARGET)
+ 	@echo "#" extracting $(XC16_PACKAGE)
