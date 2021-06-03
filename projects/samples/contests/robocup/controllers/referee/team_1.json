@@ -3,8 +3,8 @@
   "players": {
     "1": {
       "proto": "NUgus",
-      "dockerTag": "",
-      "dockerCmd": "",
+      "dockerTag": "robocup2021",
+      "dockerCmd": "webotsrobocup",
       "halfTimeStartingPose": {
         "translation": [-3.5, -3.06, 0.51],
         "rotation": [0, 0, 1, 1.57]
@@ -12,6 +12,69 @@
       "reentryStartingPose": {
         "translation": [-3.5, -3.11, 0.51],
         "rotation": [0, 0, 1, 1.57]
+      },
+      "shootoutStartingPose": {
+        "translation": [2.6, 0, 0.51],
+        "rotation": [0, 0, 1, 0]
+      },
+      "goalKeeperStartingPose": {
+        "translation": [-4.47, 0, 0.51],
+        "rotation": [0, 0, 1, 0]
+      }
+    },
+    "2": {
+      "proto": "NUgus",
+      "dockerTag": "robocup2021",
+      "dockerCmd": "webotsrobocup",
+      "halfTimeStartingPose": {
+        "translation": [-3.5, 3.06, 0.51],
+        "rotation": [0, 0, 1, -1.57]
+      },
+      "reentryStartingPose": {
+        "translation": [-3.5, 3.11, 0.51],
+        "rotation": [0, 0, 1, -1.57]
+      },
+      "shootoutStartingPose": {
+        "translation": [2.6, 0, 0.51],
+        "rotation": [0, 0, 1, 0]
+      },
+      "goalKeeperStartingPose": {
+        "translation": [-4.47, 0, 0.51],
+        "rotation": [0, 0, 1, 0]
+      }
+    },
+    "3": {
+      "proto": "NUgus",
+      "dockerTag": "robocup2021",
+      "dockerCmd": "webotsrobocup",
+      "halfTimeStartingPose": {
+        "translation": [-0.75, -3.06, 0.51],
+        "rotation": [0, 0, 1, 1.57]
+      },
+      "reentryStartingPose": {
+        "translation": [-0.75, -3.11, 0.51],
+        "rotation": [0, 0, 1, 1.57]
+      },
+      "shootoutStartingPose": {
+        "translation": [2.6, 0, 0.51],
+        "rotation": [0, 0, 1, 0]
+      },
+      "goalKeeperStartingPose": {
+        "translation": [-4.47, 0, 0.51],
+        "rotation": [0, 0, 1, 0]
+      }
+    },
+    "4": {
+      "proto": "NUgus",
+      "dockerTag": "robocup2021",
+      "dockerCmd": "webotsrobocup",
+      "halfTimeStartingPose": {
+        "translation": [-0.75, 3.06, 0.51],
+        "rotation": [0, 0, 1, -1.57]
+      },
+      "reentryStartingPose": {
+        "translation": [-0.75, 3.11, 0.51],
+        "rotation": [0, 0, 1, -1.57]
       },
       "shootoutStartingPose": {
         "translation": [2.6, 0, 0.51],

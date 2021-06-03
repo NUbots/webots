@@ -196,6 +196,7 @@ def build_dict_node(node):
         return {}
     local_fields = {}
     local_fields["__type"] = node.getTypeName()
+    print(node.getTypeName())
     nb_fields = node.getProtoNumberOfFields()
     for i in range(nb_fields):
         field = node.getProtoFieldByIndex(i)
