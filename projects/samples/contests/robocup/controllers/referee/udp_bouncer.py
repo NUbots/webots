@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python3
 #
 # Copyright 1996-2021 Cyberbotics Ltd.
 #
@@ -15,10 +15,16 @@
 # limitations under the License.
 
 import socket
-import queue
 import threading
 import json
+import sys
 import time
+
+try:
+    from queue import SimpleQueue
+except ImportError:
+    # python < 3.7
+    from queue import Queue as SimpleQueue
 
 
 def log(message):
@@ -51,7 +57,7 @@ SERVER_IP = "0.0.0.0"
 BUFFER = 1024
 
 # Setting up a Queue to handle incoming packages
-package_queue = queue.SimpleQueue()
+package_queue = SimpleQueue()
 
 # List of registered clients to send the information to
 clients = []
@@ -144,3 +150,7 @@ def start_bouncing_server(game_config):
     log("Server thread for Robot port started")
 
     log("Setup completed")
+
+
+if __name__ == "__main__":
+    start_bouncing_server(sys.argv[1])
