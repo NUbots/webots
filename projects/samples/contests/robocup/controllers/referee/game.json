@@ -7,22 +7,16 @@
   "side_left": "blue",
   "press_a_key_to_terminate": true,
   "game_controller_synchronization": true,
-  "use_bouncing_server": true,
+  "use_bouncing_server": false,
   "red": {
     "id": 8,
     "config": "team_1.json",
     "hosts": [
       "127.0.0.1",
-      "192.168.123.21",
-      "192.168.123.22",
-      "192.168.123.23",
-      "192.168.123.24"
+      "192.168.123.41"
     ],
     "ports": [
-      10001,
-      10002,
-      10003,
-      10004
+      10001
     ]
   },
   "blue": {
