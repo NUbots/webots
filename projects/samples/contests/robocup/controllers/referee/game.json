@@ -9,7 +9,7 @@
   "game_controller_synchronization": true,
   "use_bouncing_server": false,
   "red": {
-    "id": 8,
+    "id": 12,
     "config": "team_1.json",
     "hosts": [
       "127.0.0.1",
