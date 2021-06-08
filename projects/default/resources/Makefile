@@ -59,7 +59,7 @@ $(SUMO_TARGET):
 
 	# Replace Cyberbotics' mirror with the one we have on GitHub for faster downloads
 	# @$(WGET) https://www.cyberbotics.com/files/repository/dependencies/$(OS_TAG)/release/$(SUMO_PACKAGE)
-	@$(WGET) https://github.com/NUbots/WebotsDependenciesMirror/releases/download/v2021.05.28-a/sumo-0.30-linux64.tar.gz
+	@$(WGET) https://github.com/NUbots/WebotsDependenciesMirror/releases/download/v2021.06.08-a/sumo-0.30-linux64.tar.gz
 
 	@echo "#" extracting $(SUMO_PACKAGE)
 	@$(EXTRACT) $(SUMO_PACKAGE)

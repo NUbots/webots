@@ -46,7 +46,7 @@ $(XC16_TARGET):
 
 	# Replace Cyberbotics' mirror with the one we have on GitHub for faster downloads
 	# @$(WGET) https://www.cyberbotics.com/files/repository/dependencies/$(OS_TAG)/release/$(XC16_PACKAGE)
-	@$(WGET) https://github.com/NUbots/WebotsDependenciesMirror/releases/download/v2021.05.28-a/xc16-1.24.zip
+	@$(WGET) https://github.com/NUbots/WebotsDependenciesMirror/releases/download/v2021.06.08-a/xc16-1.24.zip
 
 	@echo "#" removing old $(XC16_TARGET)
 	@rm -rf $(XC16_TARGET)
