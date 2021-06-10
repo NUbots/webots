@@ -182,7 +182,7 @@ PROTO NUgusMain [
                         }
                         Solid {
                           name "right_hand [hand]"
-                          translation 0.0 -0.2 0.0
+                          translation 0.0 -0.225 0.014
                           rotation 0.000000 1.000000 0.000000 0.000000
                         }
                       ]
@@ -401,7 +401,7 @@ PROTO NUgusMain [
                         }
                         Solid {
                           name "left_hand [hand]"
-                          translation 0.0 -0.21 0.0
+                          translation 0.0 -0.225 0.014
                           rotation 0.000000 1.000000 0.000000 0.000000
                         }
                       ]
