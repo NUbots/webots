@@ -73,6 +73,7 @@ DROPPED_BALL_TEAM_ID = 128                # The team id used for dropped ball
 BALL_DIST_PERIOD = 1                      # seconds. The period at which distance to the ball is checked
 BALL_HOLDING_RATIO = 1.0/3                # The ratio of the radius used to compute minimal distance to the convex hull
 GAME_INTERRUPTION_PLACEMENT_NB_STEPS = 5  # The maximal number of steps allowed when moving ball or player away
+STATUS_PRINT_PERIOD = 20                  # Real time between two status updates in seconds
 
 # game interruptions requiring a free kick procedure
 GAME_INTERRUPTIONS = {
@@ -88,18 +89,25 @@ GOAL_HALF_WIDTH = GOAL_WIDTH / 2
 global supervisor, game, red_team, blue_team, log_file, time_count, time_step, game_controller_udp_filter
 
 
-def log(message, type):
-    if type == 'Warning':
+def log(message, msg_type, force_flush=True):
+    if type(message) is list:
+        for m in message:
+            log(m, msg_type, False)
+        if log_file and force_flush:
+            log_file.flush()
+        return
+    if msg_type == 'Warning':
         console_message = f'{AnsiCodes.YELLOW_FOREGROUND}{AnsiCodes.BOLD}{message}{AnsiCodes.RESET}'
-    elif type == 'Error':
+    elif msg_type == 'Error':
         console_message = f'{AnsiCodes.RED_FOREGROUND}{AnsiCodes.BOLD}{message}{AnsiCodes.RESET}'
     else:
         console_message = message
-    print(console_message, file=sys.stderr if type == 'Error' else sys.stdout)
+    print(console_message, file=sys.stderr if msg_type == 'Error' else sys.stdout)
     if log_file:
         real_time = int(1000 * (time.time() - log.real_time)) / 1000
-        log_file.write(f'[{real_time:08.3f}|{time_count / 1000:08.3f}] {type}: {message}\n')  # log real and virtual times
-        log_file.flush()
+        log_file.write(f'[{real_time:08.3f}|{time_count / 1000:08.3f}] {msg_type}: {message}\n')  # log real and virtual times
+        if force_flush:
+            log_file.flush()
 
 
 log.real_time = time.time()
@@ -107,13 +115,12 @@ log.real_time = time.time()
 
 def clean_exit():
     """Save logs and clean all subprocesses"""
-    if game.controller:
+    if hasattr(game, "controller") and game.controller:
         game.controller.close()
-    if game.controller_process:
+    if hasattr(game, "controller_process") and game.controller_process:
         game.controller_process.terminate()
-    if udp_bouncer_process:
+    if hasattr(game, "udp_bouncer_process") and udp_bouncer_process:
         udp_bouncer_process.terminate()
-
     if hasattr(game, 'record_simulation'):
         if game.record_simulation.endswith(".html"):
             supervisor.animationStopRecording()
@@ -123,24 +130,25 @@ def clean_exit():
             while not supervisor.movieIsReady():
                 supervisor.step(time_step)
             info("Encoding finished")
-    if game.over and game.press_a_key_to_terminate:
-        print('Press a key to terminate')
-        keyboard = supervisor.getKeyboard()
-        keyboard.enable(time_step)
-        while supervisor.step(time_step) != -1:
-            if keyboard.getKey() != -1:
-                break
-    elif game.over:
-        waiting_steps = END_OF_GAME_TIMEOUT * 1000 / time_step
-        while waiting_steps > 0:
-            supervisor.step(time_step)
+    if hasattr(game, 'over') and game.over:
+        if hasattr(game, 'press_a_key_to_terminate') and game.press_a_key_to_terminate:
+            print('Press a key to terminate')
+            keyboard = supervisor.getKeyboard()
+            keyboard.enable(time_step)
+            while supervisor.step(time_step) != -1:
+                if keyboard.getKey() != -1:
+                    break
+        else:
+            waiting_steps = END_OF_GAME_TIMEOUT * 1000 / time_step
+            while waiting_steps > 0:
+                supervisor.step(time_step)
 
     if log_file:
         log_file.close()
 
+    # Note: If supervisor.step is not called before the 'simulationQuit', information is not shown
+    supervisor.step(time_step)
     supervisor.simulationQuit(0)
-    while supervisor.step(time_step) != -1:
-        pass
 
 
 def info(message):
@@ -155,6 +163,30 @@ def error(message, fatal=False):
     log(message, 'Error')
     if fatal:
         clean_exit()
+
+
+def perform_status_update():
+    now = time.time()
+    if not hasattr(game, "last_real_time"):
+        game.last_real_time = now
+        game.last_time_count = time_count
+    elif now - game.last_real_time > STATUS_PRINT_PERIOD:
+        elapsed_real = now - game.last_real_time
+        elapsed_simulation = (time_count - game.last_time_count) / 1000
+        speed_factor = elapsed_simulation / elapsed_real
+        messages = [f"Avg speed factor: {speed_factor:.3f} (over last {elapsed_real:.2f} seconds)"]
+        if game.state is None:
+            messages.append("No messages received from GameController yet")
+        else:
+            messages.append(f"state: {game.state.game_state}, remaining time: {game.state.seconds_remaining}")
+            if game.state.secondary_state in GAME_INTERRUPTIONS:
+                messages.append(f"  sec_state: {game.state.secondary_state} phase: {game.state.secondary_state_info[1]}")
+        if game.penalty_shootout:
+            messages.append(f"{get_penalty_shootout_msg()}")
+        messages = [f"STATUS: {m}" for m in messages]
+        info(messages)
+        game.last_real_time = now
+        game.last_time_count = time_count
 
 
 def toss_a_coin_if_needed(attribute):  # attribute should be either "side_left" or "kickoff"
@@ -497,7 +529,7 @@ def game_controller_send(message):
                 if result == 'INVALID':
                     error(f'Received invalid answer from GameController for message {answered_message}.', fatal=True)
                 elif result == 'ILLEGAL':
-                    error(f'Received illegal answer from GameController for message {answered_message}.')
+                    error(f'Received illegal answer from GameController for message {answered_message}.', fatal=True)
                 else:
                     error(f'Received unknown answer from GameController: {answer}.', fatal=True)
         except BlockingIOError:
@@ -801,8 +833,6 @@ def init_team(team):
     # the players IDs should be "1", "2", "3", "4" for four players, "1", "2", "3" for three players, etc.
     count = 1
     for number in team['players']:
-        if int(number) != count:
-            error(f'Wrong team player number: expecting "{count}", found "{number}".', fatal=True)
         count += 1
         player = team['players'][number]
         player['outside_circle'] = True
@@ -822,6 +852,7 @@ def init_team(team):
 
 
 def update_team_contacts(team):
+    early_game_interruption = is_early_game_interruption()
     color = team['color']
     for number in team['players']:
         player = team['players'][number]
@@ -870,7 +901,7 @@ def update_team_contacts(team):
                 if name in player['tagged_solids']:
                     member = player['tagged_solids'][name]
             if point[2] > game.field.turf_depth:  # not a contact with the ground
-                if point in game.ball.contact_points:  # ball contact
+                if not early_game_interruption and point in game.ball.contact_points:  # ball contact
                     if member in ['arm', 'hand']:
                         player['ball_handling_last'] = time_count
                         if player['ball_handling_start'] is None:
@@ -1078,11 +1109,6 @@ def send_penalty(player, penalty, reason, log=None):
 
 def forceful_contact_foul(team, number, opponent_team, opponent_number, distance_to_ball, message):
     player = team['players'][number]
-    if 'penalty_immunity' in player:
-        if player['penalty_immunity'] < time_count:
-            del player['penalty_immunity']
-        else:
-            return
     if player['outside_penalty_area']:
         area = 'outside penalty area'
     else:
@@ -1094,13 +1120,18 @@ def forceful_contact_foul(team, number, opponent_team, opponent_number, distance
     immunity_timeout = time_count + FOUL_PENALTY_IMMUNITY * 1000
     opponent['penalty_immunity'] = immunity_timeout
     player['penalty_immunity'] = immunity_timeout
-    if distance_to_ball > FOUL_BALL_DISTANCE or not game.in_play:
+    freekick_team_id = game.blue.id if team['color'] == "red" else game.red.id
+    foul_far_from_ball = distance_to_ball > FOUL_BALL_DISTANCE
+    info(f"Ball in play: {game.in_play}, foul far from ball: {foul_far_from_ball}")
+    if foul_far_from_ball or not game.in_play:
         send_penalty(player, 'PHYSICAL_CONTACT', 'forceful contact foul')
-    elif area[0] == 'i':  # inside penalty area
-        interruption('PENALTYKICK')
+    elif area[0] == 'i' and player['inside_own_side']:  # inside own penalty area
+        ball_reset_location = [game.field.penalty_mark_x, 0]
+        if team['players'][number]['position'][0] < 0:
+            ball_reset_location[0] *= -1
+        interruption('PENALTYKICK', freekick_team_id, ball_reset_location)
     else:
         offence_location = team['players'][number]['position']
-        freekick_team_id = game.blue.id if team['color'] == "red" else game.red.id
         interruption('FREEKICK', freekick_team_id, offence_location)
 
 
@@ -1123,12 +1154,28 @@ def moves_to_ball(player, velocity, velocity_squared):
     return angle < FOUL_DIRECTION_THRESHOLD
 
 
+def readable_number_list(number_list, width=5, nb_digits=2):
+    fmt = f"%{width}.{nb_digits}f"
+    return f"[{' '.join([fmt % elem for elem in number_list])}]"
+
+
 def check_team_forceful_contacts(team, number, opponent_team, opponent_number):
     p1 = team['players'][number]
+    if 'penalty_immunity' in p1:
+        if p1['penalty_immunity'] < time_count:
+            del p1['penalty_immunity']
+        else:
+            return
     p2 = opponent_team['players'][opponent_number]
     d1 = distance2(p1['position'], game.ball_position)
     d2 = distance2(p2['position'], game.ball_position)
+    p1_str = f"{team['color']} {number}"
+    p2_str = f"{opponent_team['color']} {opponent_number}"
+    debug_messages = [f"Check if {p1_str} is performing a foul on {p2_str}",
+                      f"{p1_str:6s}: at {readable_number_list(p1['position'])}, dist to ball: {d1:.2f}",
+                      f"{p2_str:6s}: at {readable_number_list(p2['position'])}, dist to ball: {d2:.2f}"]
     if goalkeeper_inside_own_goal_area(opponent_team, opponent_number):
+        info(debug_messages)
         forceful_contact_foul(team, number, opponent_team, opponent_number, d1, 'goalkeeper')
         return True
     if team == red_team:
@@ -1139,7 +1186,11 @@ def check_team_forceful_contacts(team, number, opponent_team, opponent_number):
         blue_number = number
     if game.forceful_contact_matrix.long_collision(red_number, blue_number):
         if d1 < FOUL_VINCITY_DISTANCE and d1 - d2 > FOUL_DISTANCE_THRESHOLD:
-            forceful_contact_foul(team, number, opponent_team, opponent_number, d1, 'long collision')
+            collision_time = game.forceful_contact_matrix.get_collision_time(red_number, blue_number)
+            debug_messages.append(f"Pushing time: {collision_time} > {FOUL_PUSHING_TIME} over the last {FOUL_PUSHING_PERIOD}")
+            debug_messages.append(f"Difference of distance: {d1-d2} > {FOUL_DISTANCE_THRESHOLD}")
+            info(debug_messages)
+            forceful_contact_foul(team, number, opponent_team, opponent_number, d1, 'long_collision')
             return True
     v1 = p1['velocity']
     v2 = p2['velocity']
@@ -1147,18 +1198,27 @@ def check_team_forceful_contacts(team, number, opponent_team, opponent_number):
     v2_squared = v2[0] * v2[0] + v2[1] * v2[1]
     if not v1_squared > FOUL_SPEED_THRESHOLD * FOUL_SPEED_THRESHOLD:
         return False
+    debug_messages.append(f"{p1_str:6s}: velocity: {readable_number_list(v1[:3])}, speed: {math.sqrt(v1_squared):.2f}")
+    debug_messages.append(f"{p2_str:6s}: velocity: {readable_number_list(v2[:3])}, speed: {math.sqrt(v2_squared):.2f}")
     if d1 < FOUL_VINCITY_DISTANCE:
+        debug_messages.append(f"{p1_str} is close to the ball ({d1:.2f} < {FOUL_VINCITY_DISTANCE})")
         if moves_to_ball(p2, v2, v2_squared):
             if not moves_to_ball(p1, v1, v1_squared):
+                info(debug_messages)
                 forceful_contact_foul(team, number, opponent_team, opponent_number, d1,
                                       'opponent moving towards the ball, charge')
                 return True
             if d1 - d2 > FOUL_DISTANCE_THRESHOLD:
+                debug_messages.append(f"{p2_str} is significantly closer to the ball than {p1_str}: "
+                                      f"({d1-d2:.2f} < {FOUL_DISTANCE_THRESHOLD})")
+                info(debug_messages)
                 forceful_contact_foul(team, number, opponent_team, opponent_number, d1,
                                       'opponent moving towards the ball, charge from behind')
                 return True
     elif math.sqrt(v1_squared) - math.sqrt(v2_squared) > FOUL_SPEED_THRESHOLD:
-        forceful_contact_foul(team, number, opponent_team, opponent_number, d1, 'violent collision')
+        info(debug_messages)
+        forceful_contact_foul(team, number, opponent_team, opponent_number, d1, 'violent collision: '
+                              f'{math.sqrt(v1_squared)} - {math.sqrt(v2_squared)} > {FOUL_SPEED_THRESHOLD}')
         return True
     return False
 
@@ -1464,8 +1524,7 @@ def check_ball_must_kick(team):
             continue
         color = team['color']
         send_penalty(player, 'INCAPABLE', 'non-kicking player touched ball not in play',
-                     f'Non-kicking {color} player {number} touched ball not in play.',
-                     'Ball was touched by wrong team.')
+                     f'Non-kicking {color} player {number} touched ball not in play. Ball was touched by wrong team.')
         break
     return True
 
@@ -1483,6 +1542,21 @@ def reset_ball_touched():
     game.ball_previous_touch_player_number = None
     game.ball_last_touch_team = None
     game.ball_last_touch_player_number = None
+
+
+def is_game_interruption():
+    if not hasattr(game, "state"):
+        return False
+    return game.state.secondary_state[6:] in GAME_INTERRUPTIONS
+
+
+def is_early_game_interruption():
+    """
+    Return true if the active state is a game interruption and phase is 0.
+
+    Note: During this step, robots are allowed to commit some infringements such as touching a ball that is not in play.
+    """
+    return is_game_interruption() and game.state.secondary_state_info[1] == 0
 
 
 def game_interruption_touched(team, number):
@@ -1683,7 +1757,17 @@ def penalty_kicker_player():
     return None
 
 
+def get_penalty_shootout_msg():
+    trial = game.penalty_shootout_count + 1
+    name = "penalty shoot-out"
+    if game.penalty_shootout_count >= 10:
+        name = f"extended {name}"
+        trial -= 10
+    return f"{name} {trial}/10"
+
+
 def set_penalty_positions():
+    info(f"Setting positions for {get_penalty_shootout_msg}")
     default = game.penalty_shootout_count % 2 == 0
     attacking_color = 'red' if (game.kickoff == game.blue.id) ^ default else 'blue'
     if attacking_color == 'red':
@@ -1725,54 +1809,50 @@ def set_penalty_positions():
 
 
 def stop_penalty_shootout():
-    if game.penalty_shootout_count > 10:
-        message = 'End of penalty shoot-out.'
-    else:
-        message = 'End of extended penalty shoot-out.'
+    info(f"End of {get_penalty_shootout_msg}")
     if game.penalty_shootout_count == 20:  # end of extended penalty shootout
-        info(message)
         return True
     diff = abs(game.state.teams[0].score - game.state.teams[1].score)
     if game.penalty_shootout_count == 10 and diff > 0:
-        info(message)
         return True
     kickoff_team = game.state.teams[0] if game.kickoff == game.state.teams[0].team_number else game.state.teams[1]
     kickoff_team_leads = kickoff_team.score >= game.state.teams[0].score and kickoff_team.score >= game.state.teams[1].score
     penalty_shootout_count = game.penalty_shootout_count % 10  # supports both regular and extended shootout kicks
     if (penalty_shootout_count == 6 and diff == 3) or (penalty_shootout_count == 8 and diff == 2):
-        info(message)
         return True  # no need to go further, score is like 3-0 after 6 shootouts or 4-2 after 8 shootouts
     if penalty_shootout_count == 7:
         if diff == 3:  # score is like 4-1
-            info(message)
             return True
         if diff == 2 and not kickoff_team_leads:  # score is like 1-3
-            info(message)
             return True
     elif penalty_shootout_count == 9:
         if diff == 2:  # score is like 5-3
-            info(message)
             return True
         if diff == 1 and not kickoff_team_leads:  # score is like 3-4
-            info(message)
             return True
     return False
 
 
 def next_penalty_shootout():
     game.penalty_shootout_count += 1
-    if not game.penalty_shootout_goal and not game.state.game_state[:6] == "FINISH":
+    if not game.penalty_shootout_goal and game.state.game_state[:8] != "FINISHED":
         game_controller_send('STATE:FINISH')
-        game.penalty_shootout_goal
+    game.penalty_shootout_goal = False
     if stop_penalty_shootout():
         game.over = True
         return
     if game.penalty_shootout_count == 10:
         info('Starting extended penalty shootout without a goalkeeper and goal area entrance allowed.')
+    # Only prepare next penalty if team has a kicker available
     flip_sides()
     info(f'fliped sides: game.side_left = {game.side_left}')
-    set_penalty_positions()
-    game_controller_send('STATE:SET')
+    if penalty_kicker_player():
+        set_penalty_positions()
+        game_controller_send('STATE:SET')
+    else:
+        info("Skipping penalty trial because team has no kicker available")
+        game_controller_send('STATE:SET')
+        next_penalty_shootout()
     return
 
 
@@ -1797,22 +1877,22 @@ def check_penalty_goal_line():
             player['invalidGoalkeeperStart'] = None
 
 
-def interruption(type, team=None, location=None, is_goalkeeper_ball_manipulation=False):
-    if type == 'FREEKICK':
+def interruption(interruption_type, team=None, location=None, is_goalkeeper_ball_manipulation=False):
+    if interruption_type == 'FREEKICK':
         own_side = (game.side_left == team) ^ (game.ball_position[0] < 0)
         inside_penalty_area = game.field.circle_fully_inside_penalty_area(game.ball_position, game.ball_radius)
         if is_goalkeeper_ball_manipulation and inside_penalty_area and own_side:
             # TODO: location should be adjusted to project ball on the penalty line parallel to the goal line
-            type = 'INDIRECT_FREEKICK'
+            interruption_type = 'INDIRECT_FREEKICK'
         else:
-            type = 'DIRECT_FREEKICK'
+            interruption_type = 'DIRECT_FREEKICK'
     game.in_play = None
     game.can_score_own = False
     game.ball_set_kick = True
     if location is not None:
         game.ball_kick_translation[:2] = location[:2]
-    game.interruption = type
-    game.phase = type
+    game.interruption = interruption_type
+    game.phase = interruption_type
     game.ball_first_touch_time = 0
     game.interruption_countdown = SIMULATED_TIME_INTERRUPTION_PHASE_0
     if not team:
@@ -1823,7 +1903,7 @@ def interruption(type, team=None, location=None, is_goalkeeper_ball_manipulation
     reset_ball_touched()
     info(f'Ball not in play, will be kicked by a player from the {game.ball_must_kick_team} team.')
     color = 'red' if game.interruption_team == game.red.id else 'blue'
-    info(f'{GAME_INTERRUPTIONS[type].capitalize()} awarded to {color} team.')
+    info(f'{GAME_INTERRUPTIONS[interruption_type].capitalize()} awarded to {color} team.')
     game_controller_send(f'{game.interruption}:{game.interruption_team}')
 
 
@@ -2009,9 +2089,37 @@ def game_interruption_place_ball(target_location, enforce_distance=True):
     game.ball.resetPhysics()
     game.ball_translation.setSFVec3f(target_location)
     game.ball_set_kick = False
+    reset_ball_touched()
     info(f'Ball respawned at {target_location[0]} {target_location[1]} {target_location[2]}.')
 
 
+def read_team(json_path):
+    team = None
+    try:
+        with open(json_path) as json_file:
+            team = json.load(json_file)
+            for field_name in ["name", "players"]:
+                if field_name not in team:
+                    raise RuntimeError(f"Missing field {field_name}")
+            if len(team['players']) == 0:
+                warning(f"No players found for team {team['name']}")
+            count = 1
+            for p_key, p in team['players'].items():
+                if int(p_key) != count:
+                    raise RuntimeError(f'Wrong team player number: expecting "{count}", found "{p_key}".')
+                for field_name in ['proto', 'halfTimeStartingPose', 'reentryStartingPose', 'shootoutStartingPose',
+                                   'goalKeeperStartingPose']:
+                    if field_name not in p:
+                        raise RuntimeError(f"Missing field {field_name} in player {p_key}")
+                count += 1
+    except Exception:
+        error(f"Failed to read file {json_path} with the following error:\n{traceback.format_exc()}", fatal=True)
+    return team
+
+
+# start the webots supervisor
+supervisor = Supervisor()
+time_step = int(supervisor.getBasicTimeStep())
 time_count = 0
 
 log_file = open('log.txt', 'w')
@@ -2025,10 +2133,8 @@ if not os.path.isfile(game_config_file):
 # read configuration files
 with open(game_config_file) as json_file:
     game = json.loads(json_file.read(), object_hook=lambda d: SimpleNamespace(**d))
-with open(game.red.config) as json_file:
-    red_team = json.load(json_file)
-with open(game.blue.config) as json_file:
-    blue_team = json.load(json_file)
+red_team = read_team(game.red.config)
+blue_team = read_team(game.blue.config)
 
 # finalize the game object
 if not hasattr(game, 'minimum_real_time_factor'):
@@ -2049,9 +2155,6 @@ else:
 field_size = getattr(game, 'class').lower()
 game.field = Field(field_size)
 
-# start the webots supervisor
-supervisor = Supervisor()
-time_step = int(supervisor.getBasicTimeStep())
 
 red_team['color'] = 'red'
 blue_team['color'] = 'blue'
@@ -2087,6 +2190,7 @@ try:
             command_line = [os.path.join(JAVA_HOME, 'bin', 'java'), '-jar', 'GameControllerSimulator.jar']
             if game.minimum_real_time_factor < 1:
                 command_line.append('--fast')
+            command_line.append('--minimized')
             command_line.append('--config')
             command_line.append(game_config_file)
             if hasattr(game, 'game_controller_extra_args'):
@@ -2261,6 +2365,7 @@ try:
         if hasattr(game, 'max_duration') and (time.time() - log.real_time) > game.max_duration:
             info(f'Interrupting game automatically after {game.max_duration} seconds')
             break
+        perform_status_update()
         game_controller_send(f'CLOCK:{time_count}')
         game_controller_receive()
         if game.state is None:
@@ -2275,7 +2380,7 @@ try:
         update_contacts()  # check for collisions with the ground and ball
         update_ball_holding()  # check for ball holding for field players and goalkeeper
         update_histories()
-        if game.state.game_state == 'STATE_PLAYING':
+        if game.state.game_state == 'STATE_PLAYING' and not is_early_game_interruption():
             check_outside_turf()
             check_forceful_contacts()
             check_inactive_goalkeepers()
@@ -2294,7 +2399,7 @@ try:
                         info(f'{game.ball_kick_translation} {game.ball_position}')
                         info(f'Ball in play, can be touched by any player (moved by {d * 100:.2f} cm).')
                         game.in_play = time_count
-                    else:
+                    elif not is_game_interruption():  # The game interruption case is handled in update_team_contacts
                         team = red_team if game.ball_must_kick_team == 'blue' else blue_team
                         check_ball_must_kick(team)
             else:
@@ -2347,7 +2452,10 @@ try:
             if previous_seconds_remaining != game.state.seconds_remaining:
                 update_state_display()
                 previous_seconds_remaining = game.state.seconds_remaining
-                if not game.sent_finish and game.state.seconds_remaining <= 0:
+                # TODO find out why GC can send negative 'seconds_remaining' when secondary state is penaltykick
+                if not game.sent_finish and game.state.seconds_remaining <= 0 and \
+                   not game.state.secondary_state == "PENALTYKICK":
+                    info(f"Sending FINISH because seconds remaining = {game.state.seconds_remaining}")
                     game_controller_send('STATE:FINISH')
                     game.sent_finish = True
                     if game.penalty_shootout:  # penalty timeout was reached
@@ -2355,8 +2463,8 @@ try:
                         if game.over:
                             break
                     elif game.state.first_half:
-                        type = 'knockout ' if game.type == 'KNOCKOUT' and game.overtime else ''
-                        info(f'End of {type}first half.')
+                        game_type = 'knockout ' if game.type == 'KNOCKOUT' and game.overtime else ''
+                        info(f'End of {game_type} first half.')
                         flip_sides()
                         reset_teams('halfTimeStartingPose')
                         game.kickoff = game.blue.id if game.kickoff == game.red.id else game.red.id
@@ -2512,12 +2620,12 @@ try:
                 #       now automatic.
                 if game.ready_real_time is None:
                     if game.overtime:
-                        type = 'knockout '
+                        game_type = 'knockout '
                         game_controller_send('STATE:OVERTIME-SECOND-HALF')
                     else:
-                        type = ''
+                        game_type = ''
                         game_controller_send('STATE:SECOND-HALF')
-                    info(f'Beginning of {type}second half.')
+                    info(f'Beginning of {game_type}second half.')
                     game.ready_real_time = time.time() + HALF_TIME_BREAK_REAL_TIME_DURATION
             elif game.type == 'KNOCKOUT' and game.overtime and game.state.teams[0].score == game.state.teams[1].score:
                 if game.ready_real_time is None:
@@ -2554,7 +2662,7 @@ try:
                 game_type = ''
                 if game.overtime:
                     game_type = 'overtime '
-                info(f'Beginning of {game_type} second half.')
+                info(f'Beginning of {game_type}second half.')
                 kickoff()
                 game.ready_real_time = time.time() + HALF_TIME_BREAK_REAL_TIME_DURATION
 
