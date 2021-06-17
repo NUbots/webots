@@ -55,7 +55,8 @@ ifeq ($(OSTYPE),darwin)
 ifeq ($(PYTHON_SHORT_VERSION), 27)
 PYTHON_PATH ?= /System/Library/Frameworks/Python.framework/Versions/$(PYTHON_VERSION)
 else
-PYTHON_PATH ?= /Library/Frameworks/Python.framework/Versions/$(PYTHON_VERSION)
+# PYTHON_PATH ?= /Library/Frameworks/Python.framework/Versions/$(PYTHON_VERSION)
+PYTHON_PATH ?= /usr/local/Cellar/python@3.9/3.9.5/Frameworks/Python.framework/Versions/3.9
 endif
 SKIP_PYTHON_PYMALLOC := 27 38 39
 ifeq ($(filter $(PYTHON_SHORT_VERSION),$(SKIP_PYTHON_PYMALLOC)),)
@@ -69,7 +70,11 @@ endif
 ifeq ($(findstring llvm-g++,$(shell ls -lF $(shell which c++ 2> /dev/null))),)
 C_FLAGS         += -Wno-self-assign
 endif
+ifeq ($(PYTHON_SHORT_VERSION),39)
+LD_FLAGS         = -dynamiclib -install_name @rpath/lib/controller/python$(PYTHON_SHORT_VERSION)_brew/_$(INTERFACE:.i=.so) -Wl,-rpath,@loader_path/../../../../../.. -compatibility_version 1.0 -current_version 1.0.0 -mmacosx-version-min=$(MACOSX_MIN_SDK_VERSION) -stdlib=libc++
+else
 LD_FLAGS         = -dynamiclib -install_name @rpath/lib/controller/python$(PYTHON_SHORT_VERSION)/_$(INTERFACE:.i=.so) -Wl,-rpath,@loader_path/../../../../../.. -compatibility_version 1.0 -current_version 1.0.0 -mmacosx-version-min=$(MACOSX_MIN_SDK_VERSION) -stdlib=libc++
+endif
 PYTHON_INCLUDES  = -isystem $(PYTHON_PATH)/include/python$(PYTHON_VERSION)$(PYTHON_PYMALLOC)
 LIB             += -L"$(WEBOTS_CONTROLLER_LIB_PATH)" -lController -lCppController -L"$(PYTHON_PATH)/lib" -lpython$(PYTHON_VERSION)
 LIBRARY          = $(PYTHON_LIB_FOLDER)/_$(MODULE_NAME).so
@@ -77,6 +82,7 @@ ifneq (,$(wildcard $(BREW_PYTHON_PATH)))
 PYTHON_INCLUDES += -I"$(BREW_PYTHON_PATH)/include/python$(PYTHON_VERSION)$(PYTHON_PYMALLOC)"
 LIB             += -L"$(BREW_PYTHON_PATH)/lib"
 endif
+PYTHON_INCLUDES += -I/usr/local/Cellar/python@3.9/3.9.5/Frameworks/Python.framework/Headers
 endif
 
 TARGET = $(PYOUT) $(LIBRARY)
