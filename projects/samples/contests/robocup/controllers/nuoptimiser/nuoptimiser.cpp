@@ -544,14 +544,18 @@ public:
         warn(sensor_measurements, "Device \"" + sensorTimeStep.name() + "\" not found, time step command, ignored.");
     }
 
-    // Look for optimisation commands:
+    // Respond to optimisation commands:
     if(actuatorRequests.has_optimisation_command()) {
         std::cout << "Recieved optimisation command" << std::endl;
         switch (actuatorRequests.optimisation_command().command()) {
-          case OptimisationCommand::RESET:
-            std::cout << "Resetting World " << std::endl;
+          case OptimisationCommand::RESET_WORLD:
+            std::cout << "Resetting World and controller time" << std::endl;
             robot.simulationReset();
-            // controller_time = 0;
+            controller_time = 0;
+            break;
+          case OptimisationCommand::RESET_TIME:
+            std::cout << "Resetting controller time" << std::endl;
+            controller_time = 0;
             break;
           case OptimisationCommand::TERMINATE:
             std::cout << "Terminating " << std::endl;
@@ -565,6 +569,10 @@ public:
 
   void prepareSensorMessage() {
     sensor_measurements.set_time(controller_time);
+
+    //Add robot location
+    // sensor_measurements.
+
     struct timeval tp;
     gettimeofday(&tp, NULL);
     uint64_t real_time = tp.tv_sec * 1000 + tp.tv_usec / 1000;
