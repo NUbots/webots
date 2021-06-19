@@ -268,12 +268,7 @@ public:
 
   void step() {
     controller_time += basic_time_step;
-    std::cout << "controller_time: " << controller_time << std::endl;
-    if (controller_time > 8000) {
-      std::cout << "Resetting... " << std::endl;
-      robot.simulationReset();
-      controller_time = 0;
-    }
+    // std::cout << "controller_time: " << controller_time << std::endl;
     if (client_fd == -1) {
       client_fd = accept_client(server_fd);
       if (client_fd != -1) {
