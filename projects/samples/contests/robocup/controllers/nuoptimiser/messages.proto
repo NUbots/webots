@@ -85,8 +85,7 @@ message Message {
 
 // NUbots-specific, used for the walk optimisation
 message OptimisationRobotPosition {
-    string name  = 1;
-    Vector3 value = 2;
+    Vector3 value = 1;
 }
 
 message SensorMeasurements {
@@ -105,7 +104,7 @@ message SensorMeasurements {
     repeated PositionSensorMeasurement position_sensors = 11;
 
     // NUbots-specific, used for the walk optimisation
-    OptimisationRobotPosition          robot_position   = 20;
+    OptimisationRobotPosition robot_position = 20;
 }
 
 message MotorPosition {
@@ -150,23 +149,23 @@ message CameraExposure {
 
 // NUbots-specific, used for the walk optimisation
 message OptimisationCommand {
-    enum OptimisationCommandType {
-        RESET_WORLD   = 0;
-        TERMINATE     = 1;
+    enum CommandType {
+        RESET     = 0;
+        TERMINATE = 1;
     }
-    OptimisationCommandType command = 1;
+    CommandType command = 1;
 }
 
 message ActuatorRequests {
-    repeated MotorPosition  motor_positions       = 1;
-    repeated MotorVelocity  motor_velocities      = 2;
-    repeated MotorForce     motor_forces          = 3;
-    repeated MotorTorque    motor_torques         = 4;
-    repeated MotorPID       motor_pids            = 5;
-    repeated SensorTimeStep sensor_time_steps     = 6;
-    repeated CameraQuality  camera_qualities      = 7;
-    repeated CameraExposure camera_exposures      = 8;
+    repeated MotorPosition  motor_positions   = 1;
+    repeated MotorVelocity  motor_velocities  = 2;
+    repeated MotorForce     motor_forces      = 3;
+    repeated MotorTorque    motor_torques     = 4;
+    repeated MotorPID       motor_pids        = 5;
+    repeated SensorTimeStep sensor_time_steps = 6;
+    repeated CameraQuality  camera_qualities  = 7;
+    repeated CameraExposure camera_exposures  = 8;
 
     // NUbots-specific, used for the walk optimisation
-    OptimisationCommand     optimisation_command  = 20;
+    OptimisationCommand optimisation_command = 20;
 }
