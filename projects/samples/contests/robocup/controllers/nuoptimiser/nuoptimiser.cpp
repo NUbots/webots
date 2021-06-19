@@ -571,7 +571,10 @@ public:
     sensor_measurements.set_time(controller_time);
 
     //Add robot location
-    // sensor_measurements.
+    const double* robot_position = robot.getSelf()->getPosition();
+    sensor_measurements.mutable_robot_position()->mutable_value()->set_x(robot_position[0]);
+    sensor_measurements.mutable_robot_position()->mutable_value()->set_y(robot_position[1]);
+    sensor_measurements.mutable_robot_position()->mutable_value()->set_z(robot_position[2]);
 
     struct timeval tp;
     gettimeofday(&tp, NULL);
