@@ -69,6 +69,23 @@ def udp_recieve():
     while True:
         data, addr = sock.recvfrom(1024) # buffer size is 1024 bytes
 
+class PlayerServer:
+    def __init__(self, allowed_hosts, port, player_id, team, robot):
+        self.allowed_hosts = allowed_hosts
+        self.port = port
+        self.player_id = player_id
+        self.team = team
+        self.controller_time = 0
+        self.robot = robot
+        self.actuators_enabled = True
+        self.devices_enabled = True
+        self.basic_time_step = robot.getBasicTimeStep()
+        # start Server
+        # server_fd = create_socket_server(port)
+        # print("server started on port ")
+
+
+    
 
 
 main()
