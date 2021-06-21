@@ -261,7 +261,7 @@ public:
     devices_enabled = TRUE;
     should_terminate_sim = false;
     resetting_world = false; //the world is resetting or not
-    inital_position = {robot.getSelf()->getPosition()[0], robot.getSelf()->getPosition()[1]}; //x, y
+    inital_position = {robot.getSelf()->getPosition()[0], robot.getSelf()->getPosition()[1]};
     basic_time_step = robot.getBasicTimeStep();
     printMessage("server started on port " + std::to_string(port));
     server_fd = create_socket_server(port);
@@ -270,7 +270,6 @@ public:
 
   void step() {
     controller_time += basic_time_step;
-    // std::cout << "controller_time: " << controller_time << std::endl;
     if (client_fd == -1) {
       client_fd = accept_client(server_fd);
       if (client_fd != -1) {
@@ -570,31 +569,32 @@ public:
     }
   }
 
-  bool finishedReset(const double* robot_position){
-    //world is resetting
-    if(resetting_world){
-      //robot is in the right position
-      if(robot_position[0] == inital_position[0] && robot_position[1] == inital_position[1]){
-        return true;
-      }
-    }
-    return false;
+  bool approximatelyEqual(double a, double b) {
+      return approximatelyEqual(a, b, std::numeric_limits<double>::epsilon());
   }
 
+  bool approximatelyEqual(double a, double b, double epsilon) {
+      return std::fabs(a - b) <= (std::fabs(std::max(a, b)) * epsilon);
+  }
+
+  bool finishedReset(const double* robot_position){
+    //world is resetting and robot is in the right position
+    return resetting_world && approximatelyEqual(robot_position[0], inital_position[0]) && approximatelyEqual(robot_position[1], inital_position[1]);
+  }
 
   void prepareSensorMessage() {
     sensor_measurements.set_time(controller_time);
     
-
     //Add robot location
     const double* robot_position = robot.getSelf()->getPosition();
-
-    if(finishedReset(robot_position)){
-      sensor_measurements.set_finished_reset(true);
-    }
     sensor_measurements.mutable_robot_position()->mutable_value()->set_x(robot_position[0]);
     sensor_measurements.mutable_robot_position()->mutable_value()->set_y(robot_position[1]);
     sensor_measurements.mutable_robot_position()->mutable_value()->set_z(robot_position[2]);
+    if(finishedReset(robot_position)){
+      std::cout << "Finished Reset" << std::endl;
+      resetting_world = false;
+      sensor_measurements.set_finished_reset(true);
+    }
 
     struct timeval tp;
     gettimeofday(&tp, NULL);
@@ -792,7 +792,7 @@ private:
   bool actuators_enabled;
   bool devices_enabled;
   bool resetting_world;
-  std::vector<float> inital_position;
+  std::vector<double> inital_position;
   /// Keys are adresses of the devices and values are timestep
   std::map<webots::Device *, int> sensors;
   // sensors that have just been added but that were previously disabled.
