@@ -260,6 +260,8 @@ public:
     actuators_enabled = TRUE;
     devices_enabled = TRUE;
     should_terminate_sim = false;
+    resetting_world = false; //the world is resetting or not
+    inital_position = {robot.getSelf()->getPosition()[0], robot.getSelf()->getPosition()[1]}; //x, y
     basic_time_step = robot.getBasicTimeStep();
     printMessage("server started on port " + std::to_string(port));
     server_fd = create_socket_server(port);
@@ -487,6 +489,11 @@ public:
     // sending values for disabled sensors.
     for (int i = 0; i < actuatorRequests.sensor_time_steps_size(); i++) {
       const SensorTimeStep sensorTimeStep = actuatorRequests.sensor_time_steps(i);
+      
+      if (sensorTimeStep.name().empty()) {
+        std::cout << "\n\ngot sensor timestep with empty name" << std::endl;
+      }
+
       webots::Device *device = robot.getDevice(sensorTimeStep.name());
       if (device) {
         const int sensor_time_step = sensorTimeStep.timestep();
@@ -540,12 +547,13 @@ public:
     }
 
     // Respond to optimisation commands:
-    if(actuatorRequests.has_optimisation_command()) {
-        std::cout << "Recieved optimisation command" << std::endl;
+    if(actuatorRequests.has_optimisation_command() && actuatorRequests.optimisation_command().command() != 0) {
+        std::cout << "Recieved optimisation command: " << actuatorRequests.optimisation_command().command() << std::endl;
         switch (actuatorRequests.optimisation_command().command()) {
           case OptimisationCommand::RESET_WORLD:
             std::cout << "Resetting World and controller time" << std::endl;
             robot.simulationReset();
+            resetting_world = true;
             controller_time = 0;
             break;
           case OptimisationCommand::RESET_TIME:
@@ -562,11 +570,28 @@ public:
     }
   }
 
+  bool finishedReset(const double* robot_position){
+    //world is resetting
+    if(resetting_world){
+      //robot is in the right position
+      if(robot_position[0] == inital_position[0] && robot_position[1] == inital_position[1]){
+        return true;
+      }
+    }
+    return false;
+  }
+
+
   void prepareSensorMessage() {
     sensor_measurements.set_time(controller_time);
+    
 
     //Add robot location
     const double* robot_position = robot.getSelf()->getPosition();
+
+    if(finishedReset(robot_position)){
+      sensor_measurements.set_finished_reset(true);
+    }
     sensor_measurements.mutable_robot_position()->mutable_value()->set_x(robot_position[0]);
     sensor_measurements.mutable_robot_position()->mutable_value()->set_y(robot_position[1]);
     sensor_measurements.mutable_robot_position()->mutable_value()->set_z(robot_position[2]);
@@ -766,7 +791,8 @@ private:
   int client_fd;
   bool actuators_enabled;
   bool devices_enabled;
-
+  bool resetting_world;
+  std::vector<float> inital_position;
   /// Keys are adresses of the devices and values are timestep
   std::map<webots::Device *, int> sensors;
   // sensors that have just been added but that were previously disabled.
