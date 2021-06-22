@@ -570,7 +570,7 @@ public:
   }
 
   bool approximatelyEqual(double a, double b) {
-      return approximatelyEqual(a, b, std::numeric_limits<double>::epsilon());
+      return approximatelyEqual(a, b, 0.015);//std::numeric_limits<double>::epsilon());
   }
 
   bool approximatelyEqual(double a, double b, double epsilon) {
@@ -578,7 +578,7 @@ public:
   }
 
   bool finishedReset(const double* robot_position){
-    //world is resetting and robot is in the right position
+    //world is resetting and robot is in the right position 
     return resetting_world && approximatelyEqual(robot_position[0], inital_position[0]) && approximatelyEqual(robot_position[1], inital_position[1]);
   }
 
@@ -593,7 +593,7 @@ public:
     if(finishedReset(robot_position)){
       std::cout << "Finished Reset" << std::endl;
       resetting_world = false;
-      sensor_measurements.set_finished_reset(true);
+      sensor_measurements.set_reset_done(true);
     }
 
     struct timeval tp;
