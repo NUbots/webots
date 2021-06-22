@@ -50,8 +50,8 @@ DEF RED_PLAYER_1 NUgus {
   supervisor TRUE
   controller "nuoptimiser"
   name "red player 1"
-  translation 3.5 -3.31 0.51
-  rotation 0 0 1 1.571592653589793
+  translation 4.419 -2.9389 0.51
+  rotation 0 0 1 2.56583
   controllerArgs [
     "10001"
     "1",
@@ -59,3 +59,4 @@ DEF RED_PLAYER_1 NUgus {
     "10.1.0.207"
     ]
   }
+#1.571592653589793
