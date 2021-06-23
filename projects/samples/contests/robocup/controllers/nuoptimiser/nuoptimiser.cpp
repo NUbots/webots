@@ -261,6 +261,7 @@ public:
     devices_enabled = TRUE;
     should_terminate_sim = false;
     resetting_world = false; //the world is resetting or not
+    resetting_world_counter = 0;
     inital_position = {robot.getSelf()->getPosition()[0], robot.getSelf()->getPosition()[1]};
     basic_time_step = robot.getBasicTimeStep();
     printMessage("server started on port " + std::to_string(port));
@@ -270,6 +271,9 @@ public:
 
   void step() {
     controller_time += basic_time_step;
+    if (resetting_world) {
+      robot.getSelf()->resetPhysics();
+    }
     if (client_fd == -1) {
       client_fd = accept_client(server_fd);
       if (client_fd != -1) {
@@ -546,12 +550,15 @@ public:
     }
 
     // Respond to optimisation commands:
+    static int reset_counter = 0;
     if(actuatorRequests.has_optimisation_command() && actuatorRequests.optimisation_command().command() != 0) {
         std::cout << "Recieved optimisation command: " << actuatorRequests.optimisation_command().command() << std::endl;
         switch (actuatorRequests.optimisation_command().command()) {
           case OptimisationCommand::RESET_WORLD:
-            std::cout << "Resetting World and controller time" << std::endl;
+            std::cout << "Resetting World and controller time " << reset_counter << std::endl;
+            reset_counter++;
             robot.simulationReset();
+            robot.getSelf()->resetPhysics();
             resetting_world = true;
             controller_time = 0;
             break;
@@ -580,6 +587,16 @@ public:
   bool finishedReset(const double* robot_position){
     //world is resetting and robot is in the right position 
     return resetting_world && approximatelyEqual(robot_position[0], inital_position[0]) && approximatelyEqual(robot_position[1], inital_position[1]);
+    // if (resetting_world && approximatelyEqual(robot_position[0], inital_position[0]) && approximatelyEqual(robot_position[1], inital_position[1])){
+    //   if (resetting_world_counter > 500) {
+    //     resetting_world_counter = 0;
+    //     return true;
+    //   } else {
+    //     std::cout << "Waiting for reset timer: " << resetting_world_counter << std::endl;
+    //     resetting_world_counter++;
+    //   }
+    // }
+    // return false;
   }
 
   void prepareSensorMessage() {
@@ -792,6 +809,7 @@ private:
   bool actuators_enabled;
   bool devices_enabled;
   bool resetting_world;
+  int resetting_world_counter;
   std::vector<double> inital_position;
   /// Keys are adresses of the devices and values are timestep
   std::map<webots::Device *, int> sensors;
