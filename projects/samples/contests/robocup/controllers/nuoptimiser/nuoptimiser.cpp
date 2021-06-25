@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <sys/time.h>
 
@@ -132,33 +133,6 @@ static bool send_all(int socket, const char *buffer, size_t length) {
   return true;
 }
 
-static int accept_client(int server_fd) {
-  int cfd;
-  struct sockaddr_in client;
-  socklen_t size = sizeof(struct sockaddr_in);
-  cfd = accept(server_fd, (struct sockaddr *)&client, &size);
-  if (cfd != -1) {
-    struct hostent *client_info = gethostbyname((char *)inet_ntoa(client.sin_addr));
-    bool allowed = false;
-    for (int i = 0; i < n_allowed_hosts; i++) {
-      if (std::string(client_info->h_name) == allowed_hosts[i]) {
-        allowed = true;
-        break;
-      }
-    }
-    if (allowed) {
-      printf("Accepted connection from %s.\n", client_info->h_name);
-      send_all(cfd, "Welcome", 8);
-    } else {
-      printf("Refused connection from %s.\n", client_info->h_name);
-      send_all(cfd, "Refused", 8);
-      close_socket(cfd);
-      cfd = -1;
-    }
-  }
-  return cfd;
-}
-
 static int create_socket_server(int port) {
   int rc;
   int server_fd;
@@ -243,9 +217,23 @@ static void warn(SensorMeasurements &sensor_measurements, std::string text) {
   message->set_text(text);
 }
 
+class MotorCommand {
+public:
+  explicit MotorCommand(webots::Motor *m) {
+    motor = m;
+    position = NAN;
+    velocity = m->getVelocity();
+    force_or_torque = NAN;
+  }
+  webots::Motor *motor;
+  double position;
+  double velocity;
+  double force_or_torque;
+};
+
 class PlayerServer {
 public:
-  PlayerServer(const std::vector<std::string> &allowed_hosts, int port, int player_id, int team, webots::Supervisor &robot) :
+  PlayerServer(const std::vector<std::string> &allowed_hosts, int port, int player_id, int team, webots::Supervisor *robot) :
     allowed_hosts(allowed_hosts),
     port(port),
     player_id(player_id),
@@ -259,20 +247,47 @@ public:
     robot(robot) {
     actuators_enabled = TRUE;
     devices_enabled = TRUE;
+    basic_time_step = robot->getBasicTimeStep();
     should_terminate_sim = false;
     resetting_world = false; //the world is resetting or not
     resetting_world_counter = 0;
-    inital_position = {robot.getSelf()->getPosition()[0], robot.getSelf()->getPosition()[1]};
-    basic_time_step = robot.getBasicTimeStep();
+    inital_position = {robot->getSelf()->getPosition()[0], robot->getSelf()->getPosition()[1]};
     printMessage("server started on port " + std::to_string(port));
     server_fd = create_socket_server(port);
     set_blocking(server_fd, false);
   }
 
+  int accept_client(int server_fd) {
+    int cfd;
+    struct sockaddr_in client;
+    socklen_t size = sizeof(struct sockaddr_in);
+    cfd = accept(server_fd, (struct sockaddr *)&client, &size);
+    if (cfd != -1) {
+      struct hostent *client_info = gethostbyname((char *)inet_ntoa(client.sin_addr));
+      bool allowed = false;
+      for (int i = 0; i < n_allowed_hosts; i++) {
+        if (std::string(client_info->h_name) == allowed_hosts[i]) {
+          allowed = true;
+          break;
+        }
+      }
+      if (allowed) {
+        printMessage("Accepted connection from " + std::string(client_info->h_name));
+        send_all(cfd, "Welcome", 8);
+      } else {
+        printMessage("Refused connection from " + std::string(client_info->h_name));
+        send_all(cfd, "Refused", 8);
+        close_socket(cfd);
+        cfd = -1;
+      }
+    }
+    return cfd;
+  }
+
   void step() {
     controller_time += basic_time_step;
     if (resetting_world) {
-      robot.getSelf()->resetPhysics();
+      robot->getSelf()->resetPhysics();
     }
     if (client_fd == -1) {
       client_fd = accept_client(server_fd);
@@ -290,10 +305,11 @@ public:
         perror("select()");
       else
         receiveMessages();
-      std::string customData = robot.getCustomData();
-      if (customData == "")
+      std::string customData = robot->getCustomData();
+      if (customData == "" && actuators_enabled == FALSE) {
+        resumeMotors();
         actuators_enabled = TRUE;
-      else if (customData == "penalized" && actuators_enabled) {
+      } else if (customData == "penalized" && actuators_enabled) {
         // penalized robots gets only their actuators disabled so that they become asleep
         stopMotors();
         actuators_enabled = FALSE;
@@ -371,18 +387,40 @@ public:
     }
     return received;
   }
-  void stopMotors() {
-    for (size_t i = 0; i != motors.size(); i++) {
-      motors[i]->setVelocity(0);
-      if (motors[i]->getType() == webots::Motor::ROTATIONAL)
-        motors[i]->setTorque(0);
+
+  MotorCommand *getMotorCommand(webots::Motor *motor) {
+    for (size_t i = 0; i != motor_commands.size(); i++)
+      if (motor_commands[i]->motor == motor)
+        return motor_commands[i];
+    MotorCommand *motor_command = new MotorCommand(motor);
+    motor_commands.push_back(motor_command);
+    return motor_command;
+  }
+
+  void stopMotors() const {
+    for (size_t i = 0; i != motor_commands.size(); i++) {
+      webots::Motor *motor = motor_commands[i]->motor;
+      motor->setVelocity(0);
+      if (motor->getType() == webots::Motor::ROTATIONAL)
+        motor->setTorque(0);
       else
-        motors[i]->setForce(0);
+        motor->setForce(0);
     }
   }
-  void addMotorIfNeeded(webots::Motor *motor) {
-    if (std::find(motors.begin(), motors.end(), motor) == motors.end())  // motor not in motors
-      motors.push_back(motor);
+  void resumeMotors() {
+    for (size_t i = 0; i != motor_commands.size(); i++) {
+      webots::Motor *motor = motor_commands[i]->motor;
+      if (!isnan(motor_commands[i]->position))
+        motor->setPosition(motor_commands[i]->position);
+      if (!isnan(motor_commands[i]->velocity))
+        motor->setVelocity(motor_commands[i]->velocity);
+      if (!isnan(motor_commands[i]->force_or_torque)) {
+        if (motor->getType() == webots::Motor::ROTATIONAL)
+          motor->setTorque(motor_commands[i]->force_or_torque);
+        else
+          motor->setForce(motor_commands[i]->force_or_torque);
+      }
+    }
   }
   void enableSensor(webots::Device *device, int time_step) {
     start_sensoring_time[device] = controller_time;  // For sensor synchronisation in case of different timesteps
@@ -424,57 +462,59 @@ public:
     recv_index = 0;
     content_size = 0;
     delete[] recv_buffer;
-    if (actuators_enabled) {
-      // Processing actuatorRequests and adding warnings to the sensor message
-      for (int i = 0; i < actuatorRequests.motor_positions_size(); i++) {
-        const MotorPosition motorPosition = actuatorRequests.motor_positions(i);
-        webots::Motor *motor = robot.getMotor(motorPosition.name());
-        if (motor) {
+    // Processing actuatorRequests and adding warnings to the sensor message
+    for (int i = 0; i < actuatorRequests.motor_positions_size(); i++) {
+      const MotorPosition motorPosition = actuatorRequests.motor_positions(i);
+      webots::Motor *motor = robot->getMotor(motorPosition.name());
+      if (motor) {
+        getMotorCommand(motor)->position = motorPosition.position();
+        if (actuators_enabled)
           motor->setPosition(motorPosition.position());
-          addMotorIfNeeded(motor);
-        } else
-          warn(sensor_measurements, "Motor \"" + motorPosition.name() + "\" not found, position command ignored.");
-      }
-      for (int i = 0; i < actuatorRequests.motor_velocities_size(); i++) {
-        const MotorVelocity motorVelocity = actuatorRequests.motor_velocities(i);
-        webots::Motor *motor = robot.getMotor(motorVelocity.name());
-        if (motor) {
+      } else
+        warn(sensor_measurements, "Motor \"" + motorPosition.name() + "\" not found, position command ignored.");
+    }
+    for (int i = 0; i < actuatorRequests.motor_velocities_size(); i++) {
+      const MotorVelocity motorVelocity = actuatorRequests.motor_velocities(i);
+      webots::Motor *motor = robot->getMotor(motorVelocity.name());
+      if (motor) {
+        getMotorCommand(motor)->velocity = motorVelocity.velocity();
+        if (actuators_enabled)
           motor->setVelocity(motorVelocity.velocity());
-          addMotorIfNeeded(motor);
-        } else
-          warn(sensor_measurements, "Motor \"" + motorVelocity.name() + "\" not found, velocity command ignored.");
-      }
-      for (int i = 0; i < actuatorRequests.motor_forces_size(); i++) {
-        const MotorForce motorForce = actuatorRequests.motor_forces(i);
-        webots::Motor *motor = robot.getMotor(motorForce.name());
-        if (motor) {
+      } else
+        warn(sensor_measurements, "Motor \"" + motorVelocity.name() + "\" not found, velocity command ignored.");
+    }
+    for (int i = 0; i < actuatorRequests.motor_forces_size(); i++) {
+      const MotorForce motorForce = actuatorRequests.motor_forces(i);
+      webots::Motor *motor = robot->getMotor(motorForce.name());
+      if (motor) {
+        getMotorCommand(motor)->force_or_torque = motorForce.force();
+        if (actuators_enabled)
           motor->setForce(motorForce.force());
-          addMotorIfNeeded(motor);
-        } else
-          warn(sensor_measurements, "Motor \"" + motorForce.name() + "\" not found, force command ignored.");
-      }
-      for (int i = 0; i < actuatorRequests.motor_torques_size(); i++) {
-        const MotorTorque motorTorque = actuatorRequests.motor_torques(i);
-        webots::Motor *motor = robot.getMotor(motorTorque.name());
-        if (motor) {
+      } else
+        warn(sensor_measurements, "Motor \"" + motorForce.name() + "\" not found, force command ignored.");
+    }
+    for (int i = 0; i < actuatorRequests.motor_torques_size(); i++) {
+      const MotorTorque motorTorque = actuatorRequests.motor_torques(i);
+      webots::Motor *motor = robot->getMotor(motorTorque.name());
+      if (motor) {
+        getMotorCommand(motor)->force_or_torque = motorTorque.torque();
+        if (actuators_enabled)
           motor->setTorque(motorTorque.torque());
-          addMotorIfNeeded(motor);
-        } else
-          warn(sensor_measurements, "Motor \"" + motorTorque.name() + "\" not found, torque command ignored.");
-      }
-      for (int i = 0; i < actuatorRequests.motor_pids_size(); i++) {
-        const MotorPID motorPID = actuatorRequests.motor_pids(i);
-        webots::Motor *motor = robot.getMotor(motorPID.name());
-        if (motor) {
-          motor->setControlPID(motorPID.pid().x(), motorPID.pid().y(), motorPID.pid().z());
-          addMotorIfNeeded(motor);
-        } else
-          warn(sensor_measurements, "Motor \"" + motorPID.name() + "\" not found, PID command ignored.");
-      }
+      } else
+        warn(sensor_measurements, "Motor \"" + motorTorque.name() + "\" not found, torque command ignored.");
+    }
+    for (int i = 0; i < actuatorRequests.motor_pids_size(); i++) {
+      const MotorPID motorPID = actuatorRequests.motor_pids(i);
+      webots::Motor *motor = robot->getMotor(motorPID.name());
+      if (motor) {
+        getMotorCommand(motor);
+        motor->setControlPID(motorPID.pid().x(), motorPID.pid().y(), motorPID.pid().z());
+      } else
+        warn(sensor_measurements, "Motor \"" + motorPID.name() + "\" not found, PID command ignored.");
     }
     for (int i = 0; i < actuatorRequests.camera_qualities_size(); i++) {
       const CameraQuality cameraQuality = actuatorRequests.camera_qualities(i);
-      webots::Camera *camera = robot.getCamera(cameraQuality.name());
+      webots::Camera *camera = robot->getCamera(cameraQuality.name());
       if (camera)
         warn(sensor_measurements, "CameraQuality is not yet implemented, ignored.");
       else
@@ -482,7 +522,7 @@ public:
     }
     for (int i = 0; i < actuatorRequests.camera_exposures_size(); i++) {
       const CameraExposure cameraExposure = actuatorRequests.camera_exposures(i);
-      webots::Camera *camera = robot.getCamera(cameraExposure.name());
+      webots::Camera *camera = robot->getCamera(cameraExposure.name());
       if (camera)
         camera->setExposure(cameraExposure.exposure());
       else
@@ -492,12 +532,7 @@ public:
     // sending values for disabled sensors.
     for (int i = 0; i < actuatorRequests.sensor_time_steps_size(); i++) {
       const SensorTimeStep sensorTimeStep = actuatorRequests.sensor_time_steps(i);
-      
-      if (sensorTimeStep.name().empty()) {
-        std::cout << "\n\ngot sensor timestep with empty name" << std::endl;
-      }
-
-      webots::Device *device = robot.getDevice(sensorTimeStep.name());
+      webots::Device *device = robot->getDevice(sensorTimeStep.name());
       if (device) {
         const int sensor_time_step = sensorTimeStep.timestep();
 
@@ -557,8 +592,8 @@ public:
           case OptimisationCommand::RESET_WORLD:
             std::cout << "Resetting World and controller time " << reset_counter << std::endl;
             reset_counter++;
-            robot.simulationReset();
-            robot.getSelf()->resetPhysics();
+            robot->simulationReset();
+            robot->getSelf()->resetPhysics();
             resetting_world = true;
             controller_time = 0;
             break;
@@ -576,7 +611,7 @@ public:
     }
   }
 
-  bool approximatelyEqual(double a, double b) {
+    bool approximatelyEqual(double a, double b) {
       return approximatelyEqual(a, b, 0.015);//std::numeric_limits<double>::epsilon());
   }
 
@@ -601,9 +636,9 @@ public:
 
   void prepareSensorMessage() {
     sensor_measurements.set_time(controller_time);
-    
+
     //Add robot location
-    const double* robot_position = robot.getSelf()->getPosition();
+    const double* robot_position = robot->getSelf()->getPosition();
     sensor_measurements.mutable_robot_position()->mutable_value()->set_x(robot_position[0]);
     sensor_measurements.mutable_robot_position()->mutable_value()->set_y(robot_position[1]);
     sensor_measurements.mutable_robot_position()->mutable_value()->set_z(robot_position[2]);
@@ -816,7 +851,7 @@ private:
   // sensors that have just been added but that were previously disabled.
   // It's required to store them to avoid sending values of unitialized sensors
   std::map<webots::Device *, int> new_sensors;
-  std::vector<webots::Motor *> motors;
+  std::vector<MotorCommand *> motor_commands;
   uint32_t controller_time;
   std::map<webots::Device *, uint32_t> start_sensoring_time;
   char *recv_buffer;
@@ -824,11 +859,11 @@ private:
   int recv_size;
   int content_size;
 
-  webots::Supervisor robot;
+  webots::Supervisor *robot;
   int basic_time_step;
   SensorMeasurements sensor_measurements;
 
-  
+
 
   /// Stores pair with {real_timestamp_ms, msg_size}
   std::deque<std::pair<uint64_t, uint32_t>> message_size_history;
@@ -876,17 +911,18 @@ int main(int argc, char *argv[]) {
   for (int i = 0; i < n_allowed_hosts; i++)
     allowed_hosts.push_back(argv[i + 3]);
 
-  webots::Supervisor robot = webots::Supervisor();
-  const int basic_time_step = robot.getBasicTimeStep();
-  const std::string name = robot.getName();
+  webots::Supervisor *robot = new webots::Supervisor();
+  const int basic_time_step = robot->getBasicTimeStep();
+  const std::string name = robot->getName();
   const int player_id = std::stoi(name.substr(name.find_last_of(' ') + 1));
   const int player_team = name[0] == 'r' ? RED : BLUE;
 
   PlayerServer server(allowed_hosts, port, player_id, player_team, robot);
 
-  while (!server.should_terminate_sim && robot.step(basic_time_step) != -1)
+  while (!server.should_terminate_sim && robot->step(basic_time_step) != -1)
     server.step();
 
-  robot.simulationQuit(EXIT_SUCCESS);
+  robot->simulationQuit(EXIT_SUCCESS);
+  delete robot;
   return 0;
 }
