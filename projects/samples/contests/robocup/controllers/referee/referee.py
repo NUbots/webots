@@ -41,8 +41,8 @@ INACTIVE_GOALKEEPER_TIMEOUT = 20          # a goalkeeper is penalized if inactiv
 INACTIVE_GOALKEEPER_DIST = 0.5            # if goalkeeper is farther than this distance it can't be inactive
 INACTIVE_GOALKEEPER_PROGRESS = 0.05       # the minimal distance to move toward the ball in order to be considered active
 DROPPED_BALL_TIMEOUT = 120                # wait 2 simulated minutes if the ball doesn't move before starting dropped ball
-SIMULATED_TIME_INTERRUPTION_PHASE_0 = 10  # waiting time of 10 simulated seconds in phase 0 of interruption
-SIMULATED_TIME_INTERRUPTION_PHASE_1 = 30  # waiting time of 30 simulated seconds in phase 1 of interruption
+SIMULATED_TIME_INTERRUPTION_PHASE_0 = 5   # waiting time of 5 simulated seconds in phase 0 of interruption
+SIMULATED_TIME_INTERRUPTION_PHASE_1 = 15  # waiting time of 15 simulated seconds in phase 1 of interruption
 SIMULATED_TIME_BEFORE_PLAY_STATE = 5      # wait 5 simulated seconds in SET state before sending the PLAY state
 SIMULATED_TIME_SET_PENALTY_SHOOTOUT = 15  # wait 15 simulated seconds in SET state before sending the PLAY state
 HALF_TIME_BREAK_REAL_TIME_DURATION = 15   # the half-time break lasts 15 real seconds
@@ -55,7 +55,7 @@ PLAYERS_BALL_HOLDING_TIMEOUT = 1          # field players may hold the ball up t
 BALL_HANDLING_TIMEOUT = 10                # a player throwing in or a goalkeeper may hold the ball up to 10 seconds in hands
 BALL_LIFT_THRESHOLD = 0.05                # during a throw-in with the hands, the ball must be lifted by at least 5 cm
 GOALKEEPER_GROUND_BALL_HANDLING = 6       # a goalkeeper may handle the ball on the ground for up to 6 seconds
-END_OF_GAME_TIMEOUT = 10                  # Once the game is finished, let the referee run for 10 seconds before closing game
+END_OF_GAME_TIMEOUT = 5                   # Once the game is finished, let the referee run for 5 seconds before closing game
 BALL_IN_PLAY_MOVE = 0.05                  # the ball must move 5 cm after interruption or kickoff to be considered in play
 FOUL_PUSHING_TIME = 1                     # 1 second
 FOUL_PUSHING_PERIOD = 2                   # 2 seconds
@@ -139,16 +139,6 @@ def clean_exit():
     if hasattr(game, "udp_bouncer_process") and udp_bouncer_process:
         info("Terminating 'udp_bouncer' process")
         udp_bouncer_process.terminate()
-    if hasattr(game, 'record_simulation'):
-        if game.record_simulation.endswith(".html"):
-            info("Stopping animation recording")
-            supervisor.animationStopRecording()
-        elif game.record_simulation.endswith(".mp4"):
-            info("Starting encoding")
-            supervisor.movieStopRecording()
-            while not supervisor.movieIsReady():
-                supervisor.step(time_step)
-            info("Encoding finished")
     if hasattr(game, 'over') and game.over:
         info("Game is over")
         if hasattr(game, 'press_a_key_to_terminate') and game.press_a_key_to_terminate:
@@ -164,6 +154,18 @@ def clean_exit():
             while waiting_steps > 0:
                 supervisor.step(time_step)
                 waiting_steps -= 1
+            info("Finished waiting")
+    if hasattr(game, 'record_simulation'):
+        if game.record_simulation.endswith(".html"):
+            info("Stopping animation recording")
+            supervisor.animationStopRecording()
+        elif game.record_simulation.endswith(".mp4"):
+            info("Starting encoding")
+            supervisor.movieStopRecording()
+            while not supervisor.movieIsReady():
+                supervisor.step(time_step)
+            info("Encoding finished")
+    info("Exiting webots properly")
 
     if log_file:
         log_file.close()
@@ -494,7 +496,8 @@ def game_controller_receive():
             game.in_play = time_count
             game.ball_last_move = time_count
     if previous_seconds_remaining != game.state.seconds_remaining:
-        if game.interruption_seconds is not None:
+        allow_in_play = game.wait_for_sec_state is None and game.wait_for_sec_phase is None
+        if allow_in_play and game.state.secondary_state == "STATE_NORMAL" and game.interruption_seconds is not None:
             if game.interruption_seconds - game.state.seconds_remaining > IN_PLAY_TIMEOUT:
                 if game.in_play is None:
                     info('Ball in play, can be touched by any player (10 seconds elapsed).')
@@ -610,7 +613,11 @@ def game_controller_send(message):
                 if result == 'INVALID':
                     error(f'Received invalid answer from GameController for message {answered_message}.', fatal=True)
                 elif result == 'ILLEGAL':
-                    error(f'Received illegal answer from GameController for message {answered_message}.', fatal=True)
+                    info_msg = f"Received illegal answer from GameController for message {answered_message}."
+                    if "YELLOW" in message:
+                        warning(info_msg)
+                    else:
+                        error(info_msg, fatal=True)
                 else:
                     error(f'Received unknown answer from GameController: {answer}.', fatal=True)
         except BlockingIOError:
@@ -1206,11 +1213,6 @@ def forceful_contact_foul(team, number, opponent_team, opponent_number, distance
     info(f"Ball in play: {game.in_play}, foul far from ball: {foul_far_from_ball}")
     if foul_far_from_ball or not game.in_play or game.penalty_shootout:
         send_penalty(player, 'PHYSICAL_CONTACT', 'forceful contact foul')
-    elif area[0] == 'i' and player['inside_own_side']:  # inside own penalty area
-        ball_reset_location = [game.field.penalty_mark_x, 0]
-        if team['players'][number]['position'][0] < 0:
-            ball_reset_location[0] *= -1
-        interruption('PENALTYKICK', freekick_team_id, ball_reset_location)
     else:
         offence_location = team['players'][number]['position']
         interruption('FREEKICK', freekick_team_id, offence_location)
@@ -1606,7 +1608,7 @@ def check_circle_entrance(team):
 def check_ball_must_kick(team):
     if game.ball_last_touch_team is None:
         return False  # nobody touched the ball
-    if game.ball_last_touch_team == game.ball_must_kick_team:
+    if game.dropped_ball or game.ball_last_touch_team == game.ball_must_kick_team:
         return False  # no foul
     for number in team['players']:
         if not game.ball_last_touch_player_number == int(number):
@@ -1990,20 +1992,26 @@ def interruption(interruption_type, team=None, location=None, is_goalkeeper_ball
     if interruption_type == 'FREEKICK':
         own_side = (game.side_left == team) ^ (game.ball_position[0] < 0)
         inside_penalty_area = game.field.circle_fully_inside_penalty_area(game.ball_position, game.ball_radius)
-        if is_goalkeeper_ball_manipulation and inside_penalty_area and own_side:
-            # move the ball on the penalty line parallel to the goal line
-            dx = game.field.size_x - game.field.penalty_area_length
-            dy = game.field.penalty_area_width / 2
-            moved = False
-            if abs(location[0]) > dx:
-                game.ball_kick_translation[0] = dx * (-1 if location[0] < 0 else 1)
-                moved = True
-            if abs(location[1]) > dy:
-                game.ball_kick_translation[1] = dy * (-1 if location[1] < 0 else 1)
-                moved = True
-            if moved:
-                info(f'Moved the ball on the penalty line at {game.ball_kick_translation}')
-            interruption_type = 'INDIRECT_FREEKICK'
+        if inside_penalty_area and own_side:
+            if is_goalkeeper_ball_manipulation:
+                # move the ball on the penalty line parallel to the goal line
+                dx = game.field.size_x - game.field.penalty_area_length
+                dy = game.field.penalty_area_width / 2
+                moved = False
+                if abs(location[0]) > dx:
+                    game.ball_kick_translation[0] = dx * (-1 if location[0] < 0 else 1)
+                    moved = True
+                if abs(location[1]) > dy:
+                    game.ball_kick_translation[1] = dy * (-1 if location[1] < 0 else 1)
+                    moved = True
+                if moved:
+                    info(f'Moved the ball on the penalty line at {game.ball_kick_translation}')
+                interruption_type = 'INDIRECT_FREEKICK'
+            else:
+                interruption_type = 'PENALTYKICK'
+                ball_reset_location = [game.field.penalty_mark_x, 0]
+                if location[0] < 0:
+                    ball_reset_location[0] *= -1
         else:
             interruption_type = 'DIRECT_FREEKICK'
     game.in_play = None
@@ -2276,6 +2284,11 @@ with open(game_config_file) as json_file:
     game = json.loads(json_file.read(), object_hook=lambda d: SimpleNamespace(**d))
 red_team = read_team(game.red.config)
 blue_team = read_team(game.blue.config)
+# if the game.json file is malformed with ids defined as string instead of int, we need to convert them to int:
+if not isinstance(game.red.id, int):
+    game.red.id = int(game.red.id)
+if not isinstance(game.blue.id, int):
+    game.blue.id = int(game.blue.id)
 
 # finalize the game object
 if not hasattr(game, 'minimum_real_time_factor'):
@@ -2809,7 +2822,8 @@ try:
                 if game.interruption:
                     game_controller_send(f'{game.interruption}:{game.interruption_team}:READY')
 
-        check_fallen()                                # detect fallen robots
+        if game.state.game_state != 'STATE_INITIAL':
+            check_fallen()                                # detect fallen robots
 
         if game.state.game_state == 'STATE_PLAYING' and game.in_play:
             if not game.penalty_shootout:
