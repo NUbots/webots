@@ -1,7 +1,7 @@
 #VRML_SIM R2021b utf8
 WorldInfo {
   info [
-    "Description: official soccer simulation for the 2021 Robocup Virtual Humanoid League (kid size)"
+    "Description: walk optimisation world"
     "Version 0.2"
   ]
   title "Robocup V-HL Kid"
@@ -35,7 +35,7 @@ WorldInfo {
 }
 Viewpoint {
   orientation 0.791 -0.345 -0.505 1.42
-  position -10.3 -9.31 4.96
+  position -12.0 -12.0 4.96
 }
 TexturedBackground {
   texture "stadium_dry"
@@ -44,14 +44,14 @@ TexturedBackgroundLight {
   texture "stadium_dry"
 }
 RobocupSoccerField {
-  size "kid"
+  size "adult"
 }
 DEF RED_PLAYER_1 NUgus {
   supervisor TRUE
   controller "nuoptimiser"
   name "red player 1"
-  translation 4.419 -2.9389 0.51
-  rotation 0 0 1 2.56583
+  translation -7.0 -3.0 0.51
+  rotation 0 0 1 0
   controllerArgs [
     "10001"
     "1",
